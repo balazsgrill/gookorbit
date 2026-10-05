@@ -1,0 +1,11 @@
+DROP INDEX IF EXISTS idx_book_files_checksum;
+DROP INDEX IF EXISTS idx_authors_name_trgm;
+DROP INDEX IF EXISTS idx_books_title_trgm;
+DROP TABLE IF EXISTS bookmarks_annotations;
+DROP TABLE IF EXISTS user_book_progress;
+DROP TABLE IF EXISTS book_files;
+DROP TABLE IF EXISTS book_authors;
+DROP TABLE IF EXISTS authors;
+DROP TABLE IF EXISTS books;
+DROP TABLE IF EXISTS api_tokens;
+DROP TABLE IF EXISTS users;

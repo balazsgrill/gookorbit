@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gookorbit</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  input, button, select { font: inherit; padding: .4rem .6rem; }
+  button { cursor: pointer; }
+  .book { display: flex; gap: .8rem; align-items: center; border-bottom: 1px solid #8884; padding: .6rem 0; }
+  .book img { width: 48px; height: 64px; object-fit: cover; border-radius: 3px; background: #8883; }
+  .book .meta { flex: 1; }
+  .book .title { font-weight: 600; }
+  .book .sub { font-size: .85rem; opacity: .75; }
+  .bar { height: 4px; background: #8883; border-radius: 2px; overflow: hidden; margin-top: .3rem; }
+  .bar > div { height: 100%; background: #4a7; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+  .error { color: #c55; white-space: pre-wrap; }
+  .hidden { display: none; }
+  a.btn { text-decoration: none; display: inline-block; padding: .4rem .6rem; border: 1px solid #8886; border-radius: 6px; }
+  .toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: #223; color: #fff; padding: .6rem 1rem; border-radius: 8px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<h1>gookorbit</h1>
+
+<div id="login" class="row">
+  <input id="token" type="password" placeholder="API token" size="32">
+  <button onclick="login()">Connect</button>
+</div>
+<div id="error" class="error hidden"></div>
+
+<div id="app" class="hidden">
+  <div class="row">
+    <a class="btn" id="pluginLink" href="#">Download KOReader plugin</a>
+    <label><input type="file" id="file" accept=".epub,.pdf,.cbz">
+      <button onclick="upload()">Upload book</button></label>
+  </div>
+  <div class="row">
+    <input id="query" placeholder="Search title or author…" style="flex:1" oninput="debounce(list)">
+    <button onclick="list()">Search</button>
+  </div>
+  <div id="books"></div>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+let token = localStorage.getItem('gookorbit_token') || '';
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+function errbox(msg) {
+  const e = document.getElementById('error');
+  e.textContent = msg || '';
+  e.classList.toggle('hidden', !msg);
+}
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({ 'Authorization': 'Bearer ' + token }, opts.headers || {});
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let body = '';
+    try { body = (await res.json()).error || ''; } catch {}
+    throw new Error(res.status + ' ' + (res.statusText || '') + (body ? ' — ' + body : ''));
+  }
+  return res.status === 204 ? null : res.json();
+}
+function login() {
+  token = document.getElementById('token').value.trim();
+  if (!token) return errbox('Enter a token first.');
+  localStorage.setItem('gookorbit_token', token);
+  enter();
+}
+async function enter() {
+  try {
+    await api('/api/v1/books?limit=1');
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    errbox('');
+    const base = location.origin;
+    document.getElementById('pluginLink').href =
+      base + '/api/v1/koreader/plugin/download?token=' + encodeURIComponent(token);
+    list();
+  } catch (e) {
+    errbox('Connection failed: ' + e.message);
+  }
+}
+let searchTimer;
+function debounce(fn) { clearTimeout(searchTimer); searchTimer = setTimeout(fn, 300); }
+
+async function list() {
+  const q = encodeURIComponent(document.getElementById('query').value.trim());
+  try {
+    const data = await api('/api/v1/books?limit=50&query=' + q);
+    const el = document.getElementById('books');
+    el.innerHTML = '';
+    if (!data.items.length) {
+      el.innerHTML = '<p class="sub">No books yet — upload one above.</p>';
+      return;
+    }
+    for (const b of data.items) el.appendChild(bookEl(b));
+  } catch (e) { toast(e.message); }
+}
+function bookEl(b) {
+  const div = document.createElement('div');
+  div.className = 'book';
+  const img = document.createElement('img');
+  if (b.cover_url) { img.src = b.cover_url + '?token=' + encodeURIComponent(token); img.onerror = () => img.style.display = 'none'; }
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const t = document.createElement('div');
+  t.className = 'title';
+  t.textContent = b.title;
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  sub.textContent = (b.authors || []).join(', ') +
+    (b.published_date ? ' · ' + b.published_date : '') +
+    (b.files ? ' · ' + b.files.map(f => f.format).join('/') : '');
+  meta.append(t, sub);
+  if (b.progress_ratio != null) {
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const fill = document.createElement('div');
+    fill.style.width = Math.round(b.progress_ratio * 100) + '%';
+    bar.appendChild(fill);
+    meta.appendChild(bar);
+  }
+  const actions = document.createElement('div');
+  for (const f of (b.files || [])) {
+    const a = document.createElement('a');
+    a.className = 'btn';
+    a.textContent = '⬇ ' + f.format;
+    a.href = '/api/v1/books/' + b.id + '/download?format=' + f.format + '&token=' + encodeURIComponent(token);
+    a.download = '';
+    actions.appendChild(a);
+  }
+  const del = document.createElement('button');
+  del.textContent = 'Delete';
+  del.onclick = () => removeBook(b.id);
+  actions.appendChild(del);
+  div.append(img, meta, actions);
+  return div;
+}
+async function removeBook(id) {
+  if (!confirm('Delete this book and all its files?')) return;
+  try { await api('/api/v1/books/' + id, { method: 'DELETE' }); list(); }
+  catch (e) { toast(e.message); }
+}
+async function upload() {
+  const f = document.getElementById('file').files[0];
+  if (!f) return toast('Choose a file first.');
+  const fd = new FormData();
+  fd.append('file', f);
+  toast('Uploading…');
+  try {
+    await api('/api/v1/books', { method: 'POST', body: fd });
+    toast('Uploaded.');
+    document.getElementById('file').value = '';
+    list();
+  } catch (e) { toast('Upload failed: ' + e.message); }
+}
+
+// support ?token= query param (used by the plugin download link)
+const qs = new URLSearchParams(location.search);
+if (qs.get('token')) { token = qs.get('token'); localStorage.setItem('gookorbit_token', token); }
+if (token) enter();
+</script>
+</body>
+</html>
